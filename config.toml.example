@@ -1,0 +1,17 @@
+# MoonBlokz Log Collector Configuration Example
+# Copy this file to config.toml and fill in your values
+
+# API key for authenticating with the telemetry hub
+api-key = "your-api-key-here"
+
+# Base URL of the telemetry hub (without /download suffix)
+hub-url = "https://your-hub-url.com"
+
+# Path to the output log file
+log-file = "moonblokz-logs.txt"
+
+# Polling interval in seconds (default: 60)
+interval = 60
+
+# Optional: Maximum number of items to retrieve per request
+# max-items = 10000
