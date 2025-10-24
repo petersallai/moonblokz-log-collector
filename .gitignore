@@ -24,3 +24,6 @@ examples/moonblokz-radio-embedded-test/target
 .DS_Store
 .vscode
 Cargo.lock
+
+config.toml
+*.log
