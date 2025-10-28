@@ -16,8 +16,6 @@ pub struct Config {
     #[serde(default = "default_interval")]
     pub interval: u64,
     
-    #[serde(rename = "max-items")]
-    pub max_items: Option<usize>,
 }
 
 fn default_interval() -> u64 {

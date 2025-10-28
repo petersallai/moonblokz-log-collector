@@ -12,6 +12,3 @@ log-file = "moonblokz-logs.txt"
 
 # Polling interval in seconds (default: 60)
 interval = 60
-
-# Optional: Maximum number of items to retrieve per request
-# max-items = 10000
