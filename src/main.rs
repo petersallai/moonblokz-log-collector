@@ -28,6 +28,7 @@ struct LogEntry {
 #[derive(Debug, Deserialize)]
 struct DownloadResponse {
     logs: Vec<LogEntry>,
+    update_interval: u64,
 }
 
 struct LogCollector {
@@ -42,25 +43,23 @@ impl LogCollector {
             .timeout(Duration::from_secs(30))
             .build()
             .context("Failed to create HTTP client")?;
-        
-        Ok(Self {
-            config,
-            client,
-            last_id: 0,
-        })
+
+        Ok(Self { config, client, last_id: 0 })
     }
-    
+
     async fn run(&mut self) -> Result<()> {
         // Ensure log file exists or can be created
         self.ensure_log_file().await?;
-        
+
         eprintln!("Log collector started. Downloading from: {}", self.config.hub_url);
         eprintln!("Writing logs to: {}", self.config.log_file.display());
-        eprintln!("Polling interval: {} seconds", self.config.interval);
-        
+
+        let mut poll_interval: u64 = 60; // Default until we get first response
+
         loop {
             match self.fetch_and_save_logs().await {
-                Ok(count) => {
+                Ok((count, new_interval)) => {
+                    poll_interval = new_interval;
                     if count > 0 {
                         eprintln!("Downloaded and saved {} log entries (last_id: {})", count, self.last_id);
                     }
@@ -71,11 +70,11 @@ impl LogCollector {
                     // If we get here with a 401, the function has already returned it as an error
                 }
             }
-            
-            sleep(Duration::from_secs(self.config.interval)).await;
+
+            sleep(Duration::from_secs(poll_interval)).await;
         }
     }
-    
+
     async fn ensure_log_file(&self) -> Result<()> {
         // Try to open the file for appending, create if it doesn't exist
         OpenOptions::new()
@@ -84,25 +83,23 @@ impl LogCollector {
             .open(&self.config.log_file)
             .await
             .with_context(|| format!("Failed to open or create log file: {}", self.config.log_file.display()))?;
-        
+
         Ok(())
     }
-    
-    async fn fetch_and_save_logs(&mut self) -> Result<usize> {
-        let url = format!("{}/download?last_log_message_id={}", 
-            self.config.hub_url.trim_end_matches('/'), 
-            self.last_id
-        );
-        
-        let response = self.client
+
+    async fn fetch_and_save_logs(&mut self) -> Result<(usize, u64)> {
+        let url = format!("{}/download?last_log_message_id={}", self.config.hub_url.trim_end_matches('/'), self.last_id);
+
+        let response = self
+            .client
             .get(&url)
             .header("X-Api-Key", &self.config.api_key)
             .send()
             .await
             .context("Failed to send request to hub")?;
-        
+
         let status = response.status();
-        
+
         if !status.is_success() {
             match status.as_u16() {
                 401 => {
@@ -111,38 +108,36 @@ impl LogCollector {
                 }
                 400 => {
                     eprintln!("400 Bad Request from server");
-                    return Ok(0);
+                    return Ok((0, 60));
                 }
                 500..=599 => {
                     eprintln!("Server error: {}", status);
-                    return Ok(0);
+                    return Ok((0, 60));
                 }
                 _ => {
                     eprintln!("Unexpected status code: {}", status);
-                    return Ok(0);
+                    return Ok((0, 60));
                 }
             }
         }
-        
-        let download_response: DownloadResponse = response
-            .json()
-            .await
-            .context("Failed to parse JSON response")?;
-        
+
+        let download_response: DownloadResponse = response.json().await.context("Failed to parse JSON response")?;
+
         let log_count = download_response.logs.len();
-        
+        let update_interval = download_response.update_interval;
+
         if log_count > 0 {
             self.append_logs_to_file(&download_response.logs).await?;
-            
+
             // Update last_id to the highest item_id seen
             if let Some(max_id) = download_response.logs.iter().map(|entry| entry.item_id).max() {
                 self.last_id = max_id;
             }
         }
-        
-        Ok(log_count)
+
+        Ok((log_count, update_interval))
     }
-    
+
     async fn append_logs_to_file(&self, logs: &[LogEntry]) -> Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
@@ -150,18 +145,14 @@ impl LogCollector {
             .open(&self.config.log_file)
             .await
             .with_context(|| format!("Failed to open log file for writing: {}", self.config.log_file.display()))?;
-        
+
         for entry in logs {
             let line = format!("{}:{}\n", entry.timestamp, entry.message);
-            file.write_all(line.as_bytes())
-                .await
-                .context("Failed to write log entry to file")?;
+            file.write_all(line.as_bytes()).await.context("Failed to write log entry to file")?;
         }
-        
-        file.flush()
-            .await
-            .context("Failed to flush log file")?;
-        
+
+        file.flush().await.context("Failed to flush log file")?;
+
         Ok(())
     }
 }
@@ -169,11 +160,10 @@ impl LogCollector {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    
-    let config = Config::from_file(&args.config)
-        .context("Failed to load configuration")?;
-    
+
+    let config = Config::from_file(&args.config).context("Failed to load configuration")?;
+
     let mut collector = LogCollector::new(config)?;
-    
+
     collector.run().await
 }

@@ -9,6 +9,3 @@ hub-url = "https://your-hub-url.com"
 
 # Path to the output log file
 log-file = "moonblokz-logs.txt"
-
-# Polling interval in seconds (default: 60)
-interval = 60
