@@ -1,6 +1,7 @@
 mod config;
 
 use anyhow::{Context, Result};
+use chrono::Local;
 use clap::Parser;
 use config::Config;
 use serde::Deserialize;
@@ -8,6 +9,18 @@ use std::path::PathBuf;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, Duration};
+
+macro_rules! log_info {
+    ($($arg:tt)*) => {
+        eprintln!("[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), format!($($arg)*))
+    };
+}
+
+macro_rules! log_error {
+    ($($arg:tt)*) => {
+        eprintln!("[{}] ERROR: {}", Local::now().format("%Y-%m-%d %H:%M:%S"), format!($($arg)*))
+    };
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "moonblokz-log-collector")]
@@ -51,8 +64,8 @@ impl LogCollector {
         // Ensure log file exists or can be created
         self.ensure_log_file().await?;
 
-        eprintln!("Log collector started. Downloading from: {}", self.config.hub_url);
-        eprintln!("Writing logs to: {}", self.config.log_file.display());
+        log_info!("Log collector started. Downloading from: {}", self.config.hub_url);
+        log_info!("Writing logs to: {}", self.config.log_file.display());
 
         let mut poll_interval: u64 = 60; // Default until we get first response
 
@@ -61,11 +74,11 @@ impl LogCollector {
                 Ok((count, new_interval)) => {
                     poll_interval = new_interval;
                     if count > 0 {
-                        eprintln!("Downloaded and saved {} log entries (last_id: {})", count, self.last_id);
+                        log_info!("Downloaded and saved {} log entries (last_id: {})", count, self.last_id);
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error during log download: {}", e);
+                    log_error!("Error during log download: {}", e);
                     // Error handling for 401 is done in fetch_and_save_logs
                     // If we get here with a 401, the function has already returned it as an error
                 }
@@ -107,15 +120,15 @@ impl LogCollector {
                     anyhow::bail!("401 Unauthorized: Invalid API key. Terminating.");
                 }
                 400 => {
-                    eprintln!("400 Bad Request from server");
+                    log_error!("400 Bad Request from server");
                     return Ok((0, 60));
                 }
                 500..=599 => {
-                    eprintln!("Server error: {}", status);
+                    log_error!("Server error: {}", status);
                     return Ok((0, 60));
                 }
                 _ => {
-                    eprintln!("Unexpected status code: {}", status);
+                    log_error!("Unexpected status code: {}", status);
                     return Ok((0, 60));
                 }
             }
