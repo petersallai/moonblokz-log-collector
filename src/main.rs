@@ -1,7 +1,7 @@
 mod config;
 
 use anyhow::{Context, Result};
-use chrono::Local;
+use chrono::{DateTime, Local, Utc};
 use clap::Parser;
 use config::Config;
 use serde::Deserialize;
@@ -47,7 +47,7 @@ struct DownloadResponse {
 struct LogCollector {
     config: Config,
     client: reqwest::Client,
-    last_id: u64,
+    last_timestamp: DateTime<Utc>,
 }
 
 impl LogCollector {
@@ -57,7 +57,15 @@ impl LogCollector {
             .build()
             .context("Failed to create HTTP client")?;
 
-        Ok(Self { config, client, last_id: 0 })
+        let epoch_timestamp = DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z")
+            .context("Failed to parse epoch timestamp")?
+            .with_timezone(&Utc);
+
+        Ok(Self {
+            config,
+            client,
+            last_timestamp: epoch_timestamp,
+        })
     }
 
     async fn run(&mut self) -> Result<()> {
@@ -74,7 +82,11 @@ impl LogCollector {
                 Ok((count, new_interval)) => {
                     poll_interval = new_interval;
                     if count > 0 {
-                        log_info!("Downloaded and saved {} log entries (last_id: {})", count, self.last_id);
+                        log_info!(
+                            "Downloaded and saved {} log entries (last_log_timestamp: {})",
+                            count,
+                            self.last_timestamp.to_rfc3339()
+                        );
                     }
                 }
                 Err(e) => {
@@ -101,11 +113,12 @@ impl LogCollector {
     }
 
     async fn fetch_and_save_logs(&mut self) -> Result<(usize, u64)> {
-        let url = format!("{}/download?last_log_message_id={}", self.config.hub_url.trim_end_matches('/'), self.last_id);
+        let mut url = reqwest::Url::parse(&format!("{}/download", self.config.hub_url.trim_end_matches('/'))).context("Failed to build download URL")?;
+        url.query_pairs_mut().append_pair("last_log_timestamp", &self.last_timestamp.to_rfc3339());
 
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .header("X-Api-Key", &self.config.api_key)
             .send()
             .await
@@ -142,9 +155,23 @@ impl LogCollector {
         if log_count > 0 {
             self.append_logs_to_file(&download_response.logs).await?;
 
-            // Update last_id to the highest item_id seen
-            if let Some(max_id) = download_response.logs.iter().map(|entry| entry.item_id).max() {
-                self.last_id = max_id;
+            // Update last_timestamp to the newest timestamp seen
+            let mut max_timestamp: Option<DateTime<Utc>> = None;
+            for entry in &download_response.logs {
+                match DateTime::parse_from_rfc3339(&entry.timestamp) {
+                    Ok(ts) => {
+                        let ts_utc = ts.with_timezone(&Utc);
+                        if max_timestamp.map_or(true, |current| ts_utc > current) {
+                            max_timestamp = Some(ts_utc);
+                        }
+                    }
+                    Err(_) => {
+                        log_error!("Invalid log timestamp from server: {}", entry.timestamp);
+                    }
+                }
+            }
+            if let Some(latest) = max_timestamp {
+                self.last_timestamp = latest;
             }
         }
 
