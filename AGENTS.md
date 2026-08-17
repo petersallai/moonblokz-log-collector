@@ -10,7 +10,22 @@
 - `target/`: Cargo build output (ignored).
 
 ## Architecture Context
-The collector is one of four MoonBlokz components (probe, telemetry hub, log collector, CLI). It polls the hub’s `/download` endpoint over HTTPS, appends log lines to a local file, and keeps `last_id` in memory only (no persistence between runs).
+The collector is one of four MoonBlokz components (probe, telemetry hub, log collector, CLI). It polls the hub’s `/download` endpoint over HTTPS, appends log lines to a local file, and keeps an in-memory cursor only (no persistence between runs).
+
+### Upstream Network Context (MoonBlokz Series part VII/2-5, Nov 2025)
+- Source references (MoonBlokz Medium series):
+  - `https://medium.com/moonblokz/moonblokz-series-part-vii-2-mesh-radio-algorithm-3650af3711f3`
+  - `https://medium.com/moonblokz/moonblokz-series-part-vii-3-inside-the-radio-module-d92545624d2b`
+  - `https://medium.com/moonblokz/moonblokz-series-part-vii-4-radio-network-simulation-5cc86a721e8c`
+  - `https://medium.com/moonblokz/moonblokz-series-part-vii-5-field-testing-infrastructure-6be10e18796c`
+- MoonBlokz radio networking is intentionally best-effort and delay-tolerant, not guaranteed-delivery.
+- Message propagation is adaptive (connection-aware relay delays + random jitter), so hub-side arrivals can be bursty rather than evenly spaced.
+- Nodes may receive or recover data out of order (for example, child data before parent data) and later self-heal via explicit request messages.
+- Only large blockchain payloads (`add_block`, `add_transaction`) are fragmented across packets; most control/protocol traffic is intentionally small and single-packet.
+- Queue-based, bounded buffering is a design goal in the radio stack; overflow is handled by dropping data predictably rather than blocking indefinitely.
+- Simulation guidance: topology depth (hop count) and per-node saturation are the dominant scaling bottlenecks, while many random link drops are tolerated if the network remains connected.
+- Field testing architecture adds a telemetry feedback loop (`heartbeat`, `upload`, `download`) and validates using derived metrics such as end-to-end message latency and network connectivity ratio.
+- Collector behavior should remain append-only and robust to non-uniform arrival timing from the hub.
 
 ## Build, Test, and Development Commands
 - `cargo build --release`: Build optimized binary at `target/release/moonblokz-log-collector`.
@@ -30,9 +45,12 @@ The collector is one of four MoonBlokz components (probe, telemetry hub, log col
 
 ## Configuration & Protocol Notes
 - `config.toml` keys (spec): `api-key`, `hub-url`, `log-file`, optional `interval` (seconds), optional `max-items` (<= 10,000 recommended).
-- Requests: `GET {hub-url}/download?last_log_message_id=<last_id>` with `X-Api-Key`.
-- `last_id` starts at 0 each run; update to highest `item_id` in the response.
+- Requests: `GET {hub-url}/download?last_log_timestamp=<last_timestamp>` with `X-Api-Key`.
+- `last_timestamp` starts at Unix epoch each run; update to the newest valid timestamp in the response.
+- Hub responses may include an `update_interval` value; collector loops should honor this server-directed pacing when available.
 - Log file format is append-only: `<timestamp>:<message>` with UTC ISO 8601 timestamps.
+- Do not assume evenly spaced upstream events; polling and append logic must tolerate bursts and sparse periods equally.
+- Keep collector logic transport-agnostic: radio/link details are upstream concerns; collector responsibilities are accurate retrieval, cursor advancement, and durable append.
 
 ## Commit & Pull Request Guidelines
 - Commit messages in history are short, sentence-case summaries without prefixes (e.g., “Refactor configuration …”). Follow that pattern.
