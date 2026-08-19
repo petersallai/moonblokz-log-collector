@@ -16,9 +16,11 @@ pub struct Config {
 
 impl Config {
     pub fn from_file(path: &PathBuf) -> Result<Self> {
-        let contents = std::fs::read_to_string(path).with_context(|| format!("Failed to read config file: {}", path.display()))?;
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-        let config: Config = toml::from_str(&contents).with_context(|| "Failed to parse config file")?;
+        let config: Config =
+            toml::from_str(&contents).with_context(|| "Failed to parse config file")?;
 
         // Validate required fields
         if config.api_key.is_empty() {

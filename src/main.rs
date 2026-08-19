@@ -72,7 +72,10 @@ impl LogCollector {
         // Ensure log file exists or can be created
         self.ensure_log_file().await?;
 
-        log_info!("Log collector started. Downloading from: {}", self.config.hub_url);
+        log_info!(
+            "Log collector started. Downloading from: {}",
+            self.config.hub_url
+        );
         log_info!("Writing logs to: {}", self.config.log_file.display());
 
         let mut poll_interval: u64 = 60; // Default until we get first response
@@ -107,14 +110,24 @@ impl LogCollector {
             .append(true)
             .open(&self.config.log_file)
             .await
-            .with_context(|| format!("Failed to open or create log file: {}", self.config.log_file.display()))?;
+            .with_context(|| {
+                format!(
+                    "Failed to open or create log file: {}",
+                    self.config.log_file.display()
+                )
+            })?;
 
         Ok(())
     }
 
     async fn fetch_and_save_logs(&mut self) -> Result<(usize, u64)> {
-        let mut url = reqwest::Url::parse(&format!("{}/download", self.config.hub_url.trim_end_matches('/'))).context("Failed to build download URL")?;
-        url.query_pairs_mut().append_pair("last_log_timestamp", &self.last_timestamp.to_rfc3339());
+        let mut url = reqwest::Url::parse(&format!(
+            "{}/download",
+            self.config.hub_url.trim_end_matches('/')
+        ))
+        .context("Failed to build download URL")?;
+        url.query_pairs_mut()
+            .append_pair("last_log_timestamp", &self.last_timestamp.to_rfc3339());
 
         let response = self
             .client
@@ -147,7 +160,10 @@ impl LogCollector {
             }
         }
 
-        let download_response: DownloadResponse = response.json().await.context("Failed to parse JSON response")?;
+        let download_response: DownloadResponse = response
+            .json()
+            .await
+            .context("Failed to parse JSON response")?;
 
         let log_count = download_response.logs.len();
         let update_interval = download_response.update_interval;
@@ -184,11 +200,18 @@ impl LogCollector {
             .append(true)
             .open(&self.config.log_file)
             .await
-            .with_context(|| format!("Failed to open log file for writing: {}", self.config.log_file.display()))?;
+            .with_context(|| {
+                format!(
+                    "Failed to open log file for writing: {}",
+                    self.config.log_file.display()
+                )
+            })?;
 
         for entry in logs {
             let line = format!("{}:{}\n", entry.timestamp, entry.message);
-            file.write_all(line.as_bytes()).await.context("Failed to write log entry to file")?;
+            file.write_all(line.as_bytes())
+                .await
+                .context("Failed to write log entry to file")?;
         }
 
         file.flush().await.context("Failed to flush log file")?;
